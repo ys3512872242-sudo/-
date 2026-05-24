@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no"/>
+<title>发弹幕</title>
+<style>
+  *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#f9f7f4;
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    padding:32px 24px;
+    gap:28px;
+  }
+  h1 {
+    font-size:14px;
+    font-weight:400;
+    color:#aaa;
+    letter-spacing:0.18em;
+    text-align:center;
+  }
+  .card {
+    width:100%;
+    max-width:420px;
+    background:white;
+    border-radius:20px;
+    padding:24px;
+    box-shadow:0 4px 24px rgba(0,0,0,0.06);
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+  }
+  textarea {
+    width:100%;
+    height:140px;
+    border:none;
+    outline:none;
+    resize:none;
+    font-family:inherit;
+    font-size:17px;
+    color:#1a1a1a;
+    line-height:1.7;
+    caret-color:#c0392b;
+    background:transparent;
+  }
+  textarea::placeholder { color:#bbb; }
+  .divider { height:1px; background:#e8e4de; }
+  .row { display:flex; align-items:center; justify-content:space-between; }
+  #count { font-size:13px; color:#bbb; }
+  button {
+    border:none;
+    background:#1a1a1a;
+    color:white;
+    font-family:inherit;
+    font-size:15px;
+    padding:10px 26px;
+    border-radius:12px;
+    cursor:pointer;
+    transition:background 0.2s, transform 0.12s;
+    letter-spacing:0.06em;
+  }
+  button:active { transform:scale(0.95); }
+  #tip {
+    font-size:13px;
+    color:#aaa;
+    text-align:center;
+    min-height:18px;
+    letter-spacing:0.04em;
+  }
+  .tip-red { color:#c0392b !important; }
+</style>
+</head>
+<body>
+<h1>— 留下你想说的 —</h1>
+<div class="card">
+  <textarea id="msg" placeholder="写点什么吧……" maxlength="60"></textarea>
+  <div class="divider"></div>
+  <div class="row">
+    <span id="count">0 / 60</span>
+    <button id="btn" onclick="send()">发送</button>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+const SUPABASE_URL = "https://pqlgjyohaoskvloxyulr.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxbGdqeW9oYW9za3Zsb3h5dWxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MTMyMzIsImV4cCI6MjA5NTE4OTIzMn0.PIkyWzRuE1nijFHBv6jItCJvVgaTp2ftHXTp2lWZELs";
+const TABLE = "messages";
+
+const msgEl   = document.getElementById("msg");
+const btnEl   = document.getElementById("btn");
+const tipEl   = document.getElementById("tip");
+const countEl = document.getElementById("count");
+
+msgEl.addEventListener("input", () => {
+  countEl.textContent = `${msgEl.value.length} / 60`;
+});
+msgEl.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+async function send() {
+  const text = msgEl.value.trim();
+  if (!text) { tipEl.textContent = "写点什么再发吧～"; return; }
+  btnEl.disabled = true;
+  btnEl.textContent = "发送中…";
+  tipEl.textContent = "";
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${TABLE}`, {
+      method: "POST",
+      headers: {
+        "apikey": SUPABASE_KEY,
+        "Authorization": "Bearer " + SUPABASE_KEY,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal"
+      },
+      body: JSON.stringify({ content: text })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    tipEl.textContent = "✦ 已出现在大屏上了！";
+    tipEl.className = "tip-red";
+    msgEl.value = "";
+    countEl.textContent = "0 / 60";
+    setTimeout(() => { tipEl.textContent = ""; tipEl.className = ""; }, 2500);
+  } catch(e) {
+    tipEl.textContent = "发送失败，请检查网络 🥲";
+    console.error(e);
+  }
+  btnEl.textContent = "发送";
+  btnEl.disabled = false;
+}
+</script>
+</body>
+</html>
