@@ -1,0 +1,274 @@
+<script>
+const SUPABASE_URL = "https://pqlgjyohaoskvloxyulr.supabase.co";
+
+const SUPABASE_KEY =
+"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxbGdqeW9oYW9za3Zsb3h5dWxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MTMyMzIsImV4cCI6MjA5NTE4OTIzMn0.PIkyWzRuE1nijFHBv6jItCJvVgaTp2ftHXTp2lWZELs";
+
+const TABLE = "messages";
+
+const DEFAULT_TEXTS = [
+  "对于电影来说，最打动我的从来不是台词，是演员背对镜头的那几秒",
+  "电影而不是胜利的真理，将被我们传播直至永恒"
+];
+
+const TRACK_COUNT = 10;
+
+const stage = document.getElementById("stage");
+const statusEl = document.getElementById("status");
+
+const COLORS = [
+  "#1a1a1a",
+  "#2c2c2c",
+  "#3d3d3d",
+  "#444",
+  "#1a1a1a",
+  "#c0392b",
+  "#555",
+  "#222",
+  "#2c2c2c",
+  "#333"
+];
+
+const trackFreeAt = new Array(TRACK_COUNT).fill(0);
+
+function pickTrack() {
+  let best = 0;
+
+  for (let i = 1; i < TRACK_COUNT; i++) {
+    if (trackFreeAt[i] < trackFreeAt[best]) {
+      best = i;
+    }
+  }
+
+  return best;
+}
+
+function shoot(text, isUser) {
+
+  const W = stage.offsetWidth;
+  const H = stage.offsetHeight;
+
+  const ti = pickTrack();
+  const trackH = H / TRACK_COUNT;
+
+  const top =
+    ti * trackH +
+    trackH * 0.05 +
+    Math.random() * trackH * 0.65;
+
+  const speed =
+    isUser
+      ? 65 + Math.random() * 25
+      : 38 + Math.random() * 20;
+
+  const fontSize =
+    isUser
+      ? 18 + Math.random() * 5
+      : 14 + Math.random() * 8;
+
+  const color =
+    isUser
+      ? "#c0392b"
+      : COLORS[Math.floor(Math.random() * COLORS.length)];
+
+  const opacity =
+    isUser
+      ? 1
+      : 0.5 + Math.random() * 0.45;
+
+  const el = document.createElement("div");
+
+  el.className = "danmu";
+  el.textContent = text;
+
+  el.style.cssText = `
+    top:${top}px;
+    left:${W + 10}px;
+    font-size:${fontSize}px;
+    color:${color};
+    opacity:${opacity};
+    font-weight:${isUser ? 600 : 400};
+    letter-spacing:0.04em;
+  `;
+
+  stage.appendChild(el);
+
+  requestAnimationFrame(() => {
+
+    requestAnimationFrame(() => {
+
+      const elW = el.offsetWidth;
+
+      const dur =
+        (W + elW + 30) / speed;
+
+      trackFreeAt[ti] =
+        Date.now() +
+        ((elW + 60) / speed) * 1000;
+
+      el.style.transition =
+        `left ${dur}s linear`;
+
+      el.style.left =
+        (-elW - 20) + "px";
+
+      setTimeout(() => {
+        el.remove();
+      }, dur * 1000 + 300);
+
+    });
+
+  });
+
+}
+
+/* 默认台词循环 */
+
+let defIdx = 0;
+
+function scheduleDefault() {
+
+  setTimeout(() => {
+
+    shoot(
+      DEFAULT_TEXTS[
+        defIdx % DEFAULT_TEXTS.length
+      ],
+      false
+    );
+
+    defIdx++;
+
+    scheduleDefault();
+
+  }, 1800 + Math.random() * 3200);
+
+}
+
+shoot(DEFAULT_TEXTS[0], false);
+
+setTimeout(() => {
+  shoot(DEFAULT_TEXTS[1], false);
+}, 1200);
+
+setTimeout(scheduleDefault, 2800);
+
+/* 本地二维码 */
+
+document.getElementById("qr-img").src = "./qr.png";
+
+/* Supabase */
+
+const HEADERS = {
+  "apikey": SUPABASE_KEY,
+  "Authorization": "Bearer " + SUPABASE_KEY,
+  "Content-Type": "application/json"
+};
+
+let lastId = 0;
+
+async function init() {
+
+  try {
+
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/${TABLE}?select=id,content&order=id.desc&limit=20`,
+      { headers: HEADERS }
+    );
+
+    if (!res.ok) {
+      throw new Error(await res.text());
+    }
+
+    const data = await res.json();
+
+    if (data && data.length > 0) {
+
+      lastId = data[0].id;
+
+      [...data]
+        .reverse()
+        .forEach((row, i) => {
+
+          if (
+            row.content &&
+            row.content.trim()
+          ) {
+
+            setTimeout(() => {
+              shoot(
+                row.content.trim(),
+                true
+              );
+            }, i * 700);
+
+          }
+
+        });
+
+    }
+
+    statusEl.textContent = "已连接 ✦";
+
+    setTimeout(() => {
+      statusEl.style.opacity = "0";
+    }, 3000);
+
+  } catch(e) {
+
+    statusEl.textContent =
+      "⚠️ 连接失败：" + e.message;
+
+  }
+
+}
+
+async function poll() {
+
+  try {
+
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/${TABLE}?select=id,content&id=gt.${lastId}&order=id.asc`,
+      { headers: HEADERS }
+    );
+
+    if (!res.ok) return;
+
+    const data = await res.json();
+
+    if (!data || data.length === 0) return;
+
+    data.forEach((row, i) => {
+
+      if (
+        row.content &&
+        row.content.trim()
+      ) {
+
+        setTimeout(() => {
+          shoot(
+            row.content.trim(),
+            true
+          );
+        }, i * 500);
+
+      }
+
+      if (row.id > lastId) {
+        lastId = row.id;
+      }
+
+    });
+
+  } catch(e) {
+
+    console.error(e);
+
+  }
+
+}
+
+init().then(() => {
+  setInterval(poll, 2000);
+});
+</script>
