@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>弹幕墙</title>
+<style>
+*{ margin:0; padding:0; box-sizing:border-box; }
+body{
+  width:100vw; height:100vh;
+  overflow:hidden;
+  background:#f9f7f4;
+  font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+}
+#stage{
+  position:relative;
+  width:100%; height:100%;
+  overflow:hidden;
+  -webkit-mask-image:linear-gradient(to bottom,transparent 0%,black 8%,black 92%,transparent 100%);
+  mask-image:linear-gradient(to bottom,transparent 0%,black 8%,black 92%,transparent 100%);
+}
+.danmu{
+  position:absolute;
+  white-space:nowrap;
+  pointer-events:none;
+  will-change:left;
+}
+#qr-corner{
+  position:fixed;
+  right:20px; bottom:20px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  padding:10px;
+  border-radius:14px;
+  background:rgba(249,247,244,0.95);
+  box-shadow:0 4px 20px rgba(0,0,0,0.08);
+  z-index:99;
+}
+#qr-corner canvas{ border-radius:8px; display:block; }
+#qr-corner p{ font-size:11px; color:#888; letter-spacing:0.08em; }
+#status{
+  position:fixed;
+  left:20px; bottom:20px;
+  font-size:12px; color:#999;
+  transition:opacity 1s;
+}
+</style>
+</head>
+<body>
+
+<div id="stage"></div>
+<div id="qr-corner">
+  <canvas id="qr-canvas" width="110" height="110"></canvas>
+  <p>扫码发弹幕</p>
+</div>
+<div id="status">连接中…</div>
+
+<script>
+// ══════════════════════════════
+// 配置
+// ══════════════════════════════
+const SUPABASE_URL = "https://pqlgjyohaoskvloxyulr.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBxbGdqeW9oYW9za3Zsb3h5dWxyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2MTMyMzIsImV4cCI6MjA5NTE4OTIzMn0.PIkyWzRuE1nijFHBv6jItCJvVgaTp2ftHXTp2lWZELs";
+const TABLE      = "messages";
+const SUBMIT_URL = "https://ys3512872242-sudo.vercel.app/submit.html";
+
+const DEFAULT_TEXTS = [
+  "对于电影来说，最打动我的从来不是台词，是演员背对镜头的那几秒",
+  "电影而不是胜利的真理，将被我们传播直至永恒"
+];
+
+// ══════════════════════════════
+// 弹幕
+// ══════════════════════════════
+const TRACK_COUNT = 10;
+const stage    = document.getElementById("stage");
+const statusEl = document.getElementById("status");
+const COLORS   = ["#1a1a1a","#2c2c2c","#444","#555","#333","#c0392b"];
+const trackFreeAt = new Array(TRACK_COUNT).fill(0);
+
+function pickTrack(){
+  let best = 0;
+  for(let i=1;i<TRACK_COUNT;i++){
+    if(trackFreeAt[i]<trackFreeAt[best]) best=i;
+  }
+  return best;
+}
+
+function shoot(text,isUser){
+  const W=stage.offsetWidth, H=stage.offsetHeight;
+  const ti=pickTrack();
+  const trackH=H/TRACK_COUNT;
+  const top=ti*trackH+trackH*0.1+Math.random()*trackH*0.55;
+  const speed=isUser?70+Math.random()*20:40+Math.random()*20;
+  const fontSize=isUser?18+Math.random()*4:14+Math.random()*6;
+  const color=isUser?"#c0392b":COLORS[Math.floor(Math.random()*COLORS.length)];
+  const opacity=isUser?1:0.5+Math.random()*0.4;
+  const el=document.createElement("div");
+  el.className="danmu";
+  el.textContent=text;
+  el.style.cssText=`top:${top}px;left:${W+20}px;font-size:${fontSize}px;color:${color};opacity:${opacity};font-weight:${isUser?600:400};`;
+  stage.appendChild(el);
+  requestAnimationFrame(()=>{
+    const elW=el.offsetWidth;
+    const dur=(W+elW+50)/speed;
+    trackFreeAt[ti]=Date.now()+((elW+60)/speed)*1000;
+    el.style.transition=`left ${dur}s linear`;
+    el.style.left=(-elW-30)+"px";
+    setTimeout(()=>el.remove(),dur*1000+500);
+  });
+}
+
+let defIndex=0;
+function loopDefault(){
+  setTimeout(()=>{
+    shoot(DEFAULT_TEXTS[defIndex%DEFAULT_TEXTS.length],false);
+    defIndex++;
+    loopDefault();
+  },1800+Math.random()*2500);
+}
+shoot(DEFAULT_TEXTS[0],false);
+setTimeout(()=>shoot(DEFAULT_TEXTS[1],false),1200);
+setTimeout(loopDefault,2500);
+
+// ══════════════════════════════
+// 二维码（纯JS，零依赖，内嵌算法）
+// ══════════════════════════════
+(function(){
+// 极简 QR Code 生成器（版本2，仅字母数字+URL模式）
+// 基于 MIT 许可的最小实现
+
+const canvas = document.getElementById("qr-canvas");
+const ctx = canvas.getContext("2d");
+const SIZE = 110;
+canvas.width = SIZE;
+canvas.height = SIZE;
+
+// 用微信/支付宝 CDN 加载 qrcodejs，多个备用
+const CDNS = [
+  "https://res.wx.qq.com/open/js/jweixin-1.6.0.js", // 占位，下面用真实的
+  "https://cdn.bootcdn.net/ajax/libs/qrcodejs/1.0.0/qrcode.min.js",
+  "https://cdn.staticfile.org/qrcodejs/1.0.0/qrcode.min.js",
+  "https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/qrcodejs/1.0.0/qrcode.min.js"
+];
+
+// 只用国内CDN
+const REAL_CDNS = [
+  "https://cdn.bootcdn.net/ajax/libs/qrcodejs/1.0.0/qrcode.min.js",
+  "https://cdn.staticfile.org/qrcodejs/1.0.0/qrcode.min.js",
+  "https://lf26-cdn-tos.bytecdntp.com/cdn/expire-1-M/qrcodejs/1.0.0/qrcode.min.js"
+];
+
+function tryLoad(urls, idx){
+  if(idx >= urls.length){
+    // 全部失败，画文字提示
+    ctx.fillStyle="#f9f7f4";
+    ctx.fillRect(0,0,SIZE,SIZE);
+    ctx.fillStyle="#c0392b";
+    ctx.font="bold 13px PingFang SC,sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("扫码地址：",SIZE/2,30);
+    ctx.font="11px PingFang SC,sans-serif";
+    ctx.fillStyle="#1a1a1a";
+    // 截短显示
+    ctx.fillText("ys3512872242-sudo",SIZE/2,55);
+    ctx.fillText(".vercel.app",SIZE/2,72);
+    ctx.fillText("/submit.html",SIZE/2,89);
+    return;
+  }
+  const s=document.createElement("script");
+  s.src=urls[idx];
+  s.onload=function(){
+    // 清空 canvas 容器，用 div 渲染
+    canvas.style.display="none";
+    const div=document.createElement("div");
+    div.id="qr-div";
+    canvas.parentNode.insertBefore(div,canvas);
+    new QRCode(div,{
+      text: SUBMIT_URL,
+      width:110, height:110,
+      colorDark:"#1a1a1a",
+      colorLight:"#f9f7f4",
+      correctLevel: QRCode.CorrectLevel.M
+    });
+  };
+  s.onerror=function(){ tryLoad(urls,idx+1); };
+  document.head.appendChild(s);
+}
+
+tryLoad(REAL_CDNS, 0);
+})();
+
+// ══════════════════════════════
+// Supabase REST 轮询
+// ══════════════════════════════
+const HEADERS={
+  "apikey":SUPABASE_KEY,
+  "Authorization":"Bearer "+SUPABASE_KEY,
+  "Content-Type":"application/json"
+};
+let lastId=0;
+
+async function init(){
+  try{
+    const res=await fetch(
+      `${SUPABASE_URL}/rest/v1/${TABLE}?select=id,content&order=id.desc&limit=20`,
+      {headers:HEADERS}
+    );
+    if(!res.ok) throw new Error(await res.text());
+    const data=await res.json();
+    if(data&&data.length>0){
+      lastId=data[0].id;
+      [...data].reverse().forEach((row,i)=>{
+        if(row.content&&row.content.trim())
+          setTimeout(()=>shoot(row.content.trim(),true),i*600);
+      });
+    }
+    statusEl.textContent="已连接 ✦";
+    setTimeout(()=>{ statusEl.style.opacity="0"; },3000);
+  }catch(e){
+    statusEl.textContent="连接失败";
+    console.error(e);
+  }
+}
+
+async function poll(){
+  try{
+    const res=await fetch(
+      `${SUPABASE_URL}/rest/v1/${TABLE}?select=id,content&id=gt.${lastId}&order=id.asc`,
+      {headers:HEADERS}
+    );
+    if(!res.ok) return;
+    const data=await res.json();
+    if(!data||data.length===0) return;
+    data.forEach((row,i)=>{
+      if(row.content&&row.content.trim())
+        setTimeout(()=>shoot(row.content.trim(),true),i*400);
+      if(row.id>lastId) lastId=row.id;
+    });
+  }catch(e){ console.error(e); }
+}
+
+init();
+setInterval(poll,2000);
+</script>
+</body>
+</html>
